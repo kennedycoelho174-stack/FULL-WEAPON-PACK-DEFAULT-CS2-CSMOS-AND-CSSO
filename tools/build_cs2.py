@@ -90,7 +90,7 @@ def source_images(files,mdl):
   texture='materials/'+match[1].replace('\\','/')+'.vtf'
   assert texture.lower() in lower,texture
   image=np.array(decode(files[lower[texture.lower()]])[0])
-  images[k]=image;details.append(dict(material=name,texture=texture))
+  images[k]=image;details.append(dict(material=name,texture=texture,vmt=path))
  return images,details
 
 def raster(groups,images):
@@ -291,11 +291,23 @@ def build(id,raw,out,reference=None):
   if name not in {prefix+ext for ext in ('.mdl','.vvd','.dx90.vtx','.dx80.vtx','.sw.vtx')}:assert files[name]==data
  data=glb(groups,png,id,images);weapon='cs2_'+id;directory=out/weapon;directory.mkdir(parents=True,exist_ok=True)
  template=io.BytesIO()
+ generated_material=f'materials/models/weapons/v_models/cs2_{id}/skinmaker_view.vmt'
+ retained={generated_material:files[generated_material]}
+ lookup={name.lower():name for name in files}
+ for index,detail in enumerate(materials):
+  path=detail['vmt']
+  if index==primary:
+   retained[path]=files[generated_material]
+   continue
+  retained[path]=files[path]
+  for texture in re.findall(r'\$\w+"?\s+"?(models/[^"\s}]+)',files[path].decode(errors='replace'),re.I):
+   candidate='materials/'+texture.replace('\\','/')+'.vtf'
+   if candidate.lower() in lookup:
+    key=lookup[candidate.lower()];retained[key]=files[key]
  with zipfile.ZipFile(template,'w',zipfile.ZIP_DEFLATED,compresslevel=1) as z:
   for name,b in files.items():
    if name.startswith('models/') and not name.rsplit('/',1)[-1].startswith('w_'):z.writestr(name,b)
-   elif name.startswith('materials/') and name!=f'materials/models/weapons/v_models/cs2_{id}/skinmaker_view.vmt':z.writestr(name,b)
-  material=f'materials/models/weapons/v_models/{weapon}/skinmaker_view.vmt';z.writestr(material,files[material])
+  for name,b in retained.items():z.writestr(name,b)
  report=dict(weapon=weapon,name=NAMES[id][0],source_sha256=digest(raw),vertices=count,triangles=faces,
   covered_pixels=covered,source_materials=materials,rig_and_positions_preserved=True,view_only=True,visual_validation='pending in CSMOS')
  report['obj_uv_correspondence']=reference_score
