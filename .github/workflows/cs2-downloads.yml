@@ -41,7 +41,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install --only-binary=:all: 'numpy<2.3' scipy Pillow xatlas texture2ddecoder
+      - run: |
+          python -m pip install --only-binary=:all: 'numpy<2.3' scipy Pillow xatlas texture2ddecoder
       - name: Fetch verified inputs
         env:
           ARCHIVE: ${{ matrix.archive }}
