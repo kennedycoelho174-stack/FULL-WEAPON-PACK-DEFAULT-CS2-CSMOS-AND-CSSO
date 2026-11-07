@@ -1,0 +1,90 @@
+name: Build CS2 SkinMaker downloads
+on:
+  push:
+    branches: [main]
+    paths: ['tools/**', '.github/workflows/cs2-downloads.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view skinmaker-cs2-v1 >/dev/null 2>&1 || gh release create skinmaker-cs2-v1 --target main --prerelease --title "SkinMaker CS2 — pacotes de teste na mão" --notes "35 downloads individuais com Base, Pintura e Adesivos. Geometria e animações conferidas automaticamente. Validação visual no CSMOS pendente."
+  packages:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - archive: fuzis.Weapons
+            ids: "ak47 aug famas galil m4a1s m4a4 sg553"
+          - archive: Pistols
+            ids: "deagle glock p250 usp p2000 dual tec9 fiveseven cz75 r8 zeus"
+          - archive: smgs
+            ids: "bizon mac10 mp5 mp7 mp9 p90 ump45"
+          - archive: snepers.Weapons
+            ids: "awp g3sg1 scar20 ssg"
+          - archive: Heavy.Weapons
+            ids: "mag7 nova sawedoff xm1014"
+          - archive: metralhadoras
+            ids: "m249 negev"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --only-binary=:all: 'numpy<2.3' scipy Pillow xatlas texture2ddecoder
+      - name: Fetch verified inputs
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p sources
+          curl --fail --location --retry 3 "https://github.com/kennedycoelho174-stack/FULL-WEAPON-PACK-DEFAULT-CS2-CSMOS-AND-CSSO/releases/download/v1.0/CS2SO.Pack.-.$ARCHIVE.zip" -o "sources/$ARCHIVE.zip"
+          curl --fail --location --retry 3 https://media.steampowered.com/apps/csgo/images/workshop/workshop/cs2_weapon_model_geometry.zip -o sources/geometry.zip
+          python - <<'PY'
+          import json,hashlib,os
+          from pathlib import Path
+          hashes=json.loads(Path('tools/sources.json').read_text())
+          for name in (os.environ['ARCHIVE']+'.zip','geometry.zip'):
+              assert hashlib.sha256((Path('sources')/name).read_bytes()).hexdigest()==hashes[name],name
+          PY
+      - name: Build and verify geometry, UVs and packages
+        env:
+          OPENBLAS_NUM_THREADS: '1'
+          OMP_NUM_THREADS: '2'
+        run: python tools/build_cs2.py --sources sources --out dist ${{ matrix.ids }}
+      - name: Publish per-weapon packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          cp dist/catalog.json "dist/catalog-$ARCHIVE.json"
+          gh release upload skinmaker-cs2-v1 dist/*.zip "dist/catalog-$ARCHIVE.json" --clobber
+  catalog:
+    needs: packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir fragments
+          gh release download skinmaker-cs2-v1 -p 'catalog-*.json' -D fragments
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          records=[]
+          for p in Path('fragments').glob('*.json'):records.extend(json.loads(p.read_text())['packages'])
+          assert len(records)==35 and len({x['weapon'] for x in records})==35
+          Path('catalog.json').write_text(json.dumps({'version':1,'packages':sorted(records,key=lambda x:x['weapon'])},indent=2))
+          Path('SHA256SUMS.txt').write_text(''.join(x['sha256']+'  '+x['parts'][0]['name']+'\n' for x in sorted(records,key=lambda x:x['weapon'])))
+          PY
+          gh release upload skinmaker-cs2-v1 catalog.json SHA256SUMS.txt --clobber
