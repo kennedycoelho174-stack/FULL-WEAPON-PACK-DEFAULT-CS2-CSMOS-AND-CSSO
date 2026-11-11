@@ -1,0 +1,35 @@
+name: Publish CS2 packages with ground models
+on:
+  push:
+    branches: [fix/cs2-ground-packages]
+permissions:
+  contents: write
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download pinned editor packages and original assets
+        run: |
+          mkdir -p sources packages
+          for group in Pistols fuzis.Weapons Heavy.Weapons metralhadoras smgs snepers.Weapons; do
+            curl -fsSL --retry 2 -o "sources/$group.zip" "https://github.com/${{ github.repository }}/releases/download/v1.0/CS2SO.Pack.-.$group.zip"
+          done
+          python3 - <<'PY'
+          import json, subprocess, concurrent.futures
+          def download(record):
+              name=record['parts'][0]['name']
+              subprocess.run(['curl','-fsSL','--retry','2','-o','packages/'+name,record['base']+name],check=True)
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+              list(pool.map(download,json.load(open('tools/cs2-v1-index.json'))['packages']))
+          PY
+      - run: python3 tools/add_cs2_ground.py --generator tools/build_cs2.py --sources sources --packages packages --out results --index tools/cs2-v1-index.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cs2-ground-catalog
+          path: results/catalog.json
+      - name: Publish new version without replacing existing downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create skinmaker-cs2-v2 results/* --target "${{ github.sha }}" --prerelease --title "SkinMaker CS2 v2 — ground models" --notes "35 individual CS2 downloads with original world models and materials. Ground model appearance verified in CSMOS on USP-S only."
